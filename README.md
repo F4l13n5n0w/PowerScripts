@@ -158,18 +158,6 @@ $report.results | Where-Object state -eq 'open'
 
 `data/top-ports.json` contains 1000 unique port numbers per protocol ranked by observed open-port frequency from [Nmap's service database](https://raw.githubusercontent.com/nmap/nmap/master/nmap-services), retrieved on 2026-10-02. Equal frequencies are ordered by port number, so tie-boundary selection can differ from Nmap. It includes port numbers and provenance, without service names or the full database. See [Nmap's port frequency documentation](https://nmap.org/book/nmap-services.html).
 
-### Local verification
-
-Run the integration tests from the project directory:
-
-```powershell
-.\tests\Test-PortScanner.ps1
-```
-
-Tests create temporary TCP and UDP loopback listeners, verify open/closed TCP and responding/silent UDP states, validate all exports, and check hostname resolution, IPv4/IPv6 CIDR arithmetic, deduplication, target limits, ranking selection, and invalid arguments. They scan only loopback addresses and clean up their temporary fixtures. Live SYN testing additionally requires the external backend and privileges.
-
-Local SSH/HTTP fixtures additionally verify banner recognition, HTTP HEAD requests, version extraction, silent-service handling, service fields in all exports, progress counters, progress completion, and `--no-progress`.
-
 ## Development guidelines
 
 - Use descriptive filenames, functions, and parameter names.

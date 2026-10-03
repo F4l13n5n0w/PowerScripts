@@ -45,6 +45,7 @@ Execution syntax and parameters will be documented for each script. Follow your 
 | Script | Purpose | Requirements |
 | --- | --- | --- |
 | `invoke-portscanner.ps1` | TCP connect, SYN, and UDP scanning, progress reporting, TCP service checks, and text/JSON/XML/grepable exports | PowerShell 5.1 or 7; SYN additionally requires Nmap and packet-capture privileges |
+| `kerbtest.ps1` | Read-only Kerberoasting exposure review for SPN-bearing AD user accounts | Windows with built-in .NET LDAP support and directory read access; no RSAT or modules |
 
 ## Port scanner
 
@@ -157,6 +158,58 @@ $report.results | Where-Object state -eq 'open'
 ### Port ranking data
 
 `data/top-ports.json` contains 1000 unique port numbers per protocol ranked by observed open-port frequency from [Nmap's service database](https://raw.githubusercontent.com/nmap/nmap/master/nmap-services), retrieved on 2026-10-02. Equal frequencies are ordered by port number, so tie-boundary selection can differ from Nmap. It includes port numbers and provenance, without service names or the full database. See [Nmap's port frequency documentation](https://nmap.org/book/nmap-services.html).
+
+## Kerberoasting exposure check
+
+`kerbtest.ps1` performs a read-only Active Directory assessment of ordinary user accounts with service principal names (SPNs). It reports directory indicators for review, including explicitly configured RC4/DES, password age, passwords that never expire, and `adminCount` protection markers. It does not harvest service tickets, extract hashes, guess passwords, or modify accounts.
+
+Requirements: Windows PowerShell 5.1 (included with Windows Enterprise/Server), or PowerShell 7 on Windows, connectivity to a domain controller, and an identity permitted to read the relevant directory attributes. The script uses the built-in `System.DirectoryServices` .NET APIs. No RSAT, ActiveDirectory module, installation, downloads, or local administrator privileges are required.
+
+On a domain-joined machine, run as a standard domain user with the default parameters. Windows discovers the domain through LDAP RootDSE. On a machine outside the domain, supply `-Server` and domain credentials with `-Credential (Get-Credential)`. A local-only account cannot read a domain unless it has usable domain credentials. Directory permissions and Windows execution policy still apply.
+
+LDAP searches are paged, use signed/sealed integrated authentication, and stay within the selected domain/subtree without chasing referrals. `-SearchBase` accepts a distinguished name rather than an LDAP URL. `-Server` accepts a domain/controller name or IPv4 address, optionally with a port. The script reads raw LDAP `pwdLastSet` timestamps and preserves missing encryption attributes as unknown.
+
+```powershell
+# Assess the current domain using your current identity
+.\kerbtest.ps1
+
+# Limit the assessment to an OU and export JSON, CSV, and plain text
+.\kerbtest.ps1 -Server dc01.contoso.com -SearchBase 'OU=Services,DC=contoso,DC=com' -oA kerb-audit
+
+# Check one exact account using an alternate directory identity
+.\kerbtest.ps1 -AccountName svc_sql -Credential (Get-Credential) -oJ svc-sql.json
+
+# Include disabled accounts and use a 365-day password-age review threshold
+.\kerbtest.ps1 -IncludeDisabled -PasswordAgeDays 365 -oC accounts.csv
+
+# Work with the structured report
+$report = .\kerbtest.ps1
+$report.findings | Where-Object reviewPriority -eq 'High'
+```
+
+| Parameter | Purpose |
+| --- | --- |
+| `-Server` | Domain controller or domain DNS name; current domain by default |
+| `-SearchBase` | Distinguished name for an OU/subtree |
+| `-AccountName` | Exact `sAMAccountName`; wildcard characters are literal |
+| `-Credential` | Optional `PSCredential` from `Get-Credential` |
+| `-IncludeDisabled` | Include disabled accounts as informational results |
+| `-PasswordAgeDays` | Review threshold; default 180 days |
+| `-TimeoutSeconds` | LDAP search timeout; default 30 seconds (not a whole-run deadline for discovery/binding) |
+| `-h`, `--help`, `-Help` | Display the usage guide and exit without querying AD or writing reports |
+| `-oJ`, `-OutputJson` | JSON report |
+| `-oC`, `-OutputCsv` | CSV findings, with SPNs and reasons flattened into text |
+| `-oN`, `-OutputText` | Plain-text report |
+| `-oA`, `-OutputBase` | Generate `<basename>.json`, `.csv`, and `.txt` |
+
+Output files must not exist and their parent directories must exist. The script returns a report with `findings`, run metadata, and limitations, and displays assessment progress.
+
+`reviewPriority` expresses relative review priority rather than verified exploitability. Enabled SPN-bearing user accounts start at `Medium`. DES configuration, an `adminCount` marker, or explicit RC4 combined with an old/nonexpiring password increases priority to `High`. Disabled accounts are `Informational`. Computer accounts, managed service accounts, and `krbtgt` are excluded.
+
+SPNs do not prove that a password is weak. AES configuration does not eliminate offline password-guessing risk. Password age is a review indicator only. `adminCount=1` can persist after privileged group removal, so verify current group membership.
+
+Missing or zero `msDS-SupportedEncryptionTypes` values produce unknown (`null`) RC4/AES configuration flags. They are not treated as proof of RC4 ticket issuance: KDC policy, available keys, and updates affect effective encryption. Verify actual use through domain-controller event 4769; see [Microsoft's RC4 detection guidance](https://learn.microsoft.com/en-us/windows-server/security/kerberos/detect-remediate-rc4-kerberos). Review service compatibility before making encryption changes. The script recommends managed service accounts or strong, randomly generated service credentials with managed rotation.
+
 
 ## Development guidelines
 
